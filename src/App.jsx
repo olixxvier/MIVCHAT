@@ -988,11 +988,30 @@ function App() {
 }
 
   
-  useEffect(() => {
+
+useEffect(() => {
   let mounted = true;
 
-  supabase.auth.getSession().then(({ data: { session } }) => {
-    if (mounted) {
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((_event, session) => {
+    if (!mounted) return;
+
+    setUser(session?.user ?? null);
+
+    if (session?.user) {
+      setShowLandingPage(false);
+      setAuthMode(null);
+    }
+
+    setIsSessionReady(true);
+  });
+
+  supabase.auth
+    .getSession()
+    .then(({ data: { session } }) => {
+      if (!mounted) return;
+
       setUser(session?.user ?? null);
 
       if (session?.user) {
@@ -1001,7 +1020,21 @@ function App() {
       }
 
       setIsSessionReady(true);
-    }
+    })
+    .catch((error) => {
+      console.warn('Could not restore the sign-in session:', error);
+
+      if (mounted) {
+        setIsSessionReady(true);
+      }
+    });
+
+  return () => {
+    mounted = false;
+    subscription.unsubscribe();
+  };
+}, []);
+
   }).catch((error) => {
     console.warn('Could not restore the sign-in session:', error);
     if (mounted) setIsSessionReady(true);
@@ -2186,9 +2219,21 @@ async function handleSend(event) {
 
   const allGalleryImages = [...galleryImages].sort((a, b) => b.createdAt - a.createdAt);
 
-  if (showLandingPage) {
-    return (
-      <LandingPage
+  if (!isSessionReady) {
+  return (
+    <div className="mivchat-auth-loading" role="status" aria-label="Loading MIVCHAT">
+      <div className="hero-orb">
+        <div className="hero-orb-inner">
+          <Sparkles size={35} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+if (showLandingPage) {
+  return (
+    <LandingPage
         isLight={isLight}
         onToggleTheme={() => setIsLight((current) => !current)}
         onEnter={() => setShowLandingPage(false)}
