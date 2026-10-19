@@ -989,6 +989,7 @@ function App() {
 
   
 
+
 useEffect(() => {
   let mounted = true;
 
@@ -1035,29 +1036,8 @@ useEffect(() => {
   };
 }, []);
 
-  }).catch((error) => {
-    console.warn('Could not restore the sign-in session:', error);
-    if (mounted) setIsSessionReady(true);
-  });
 
-  const {
-    data: { subscription },
-  } = supabase.auth.onAuthStateChange((_event, session) => {
-        setUser(session?.user ?? null);
 
-        if (session?.user) {
-          setShowLandingPage(false);
-          setAuthMode(null);
-        }
-
-        setIsSessionReady(true);
-      });
-
-  return () => {
-    mounted = false;
-    subscription.unsubscribe();
-  };
-}, []);
 useEffect(() => {
   try {
     localStorage.setItem(
