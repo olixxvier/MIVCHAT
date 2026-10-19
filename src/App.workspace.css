@@ -1,0 +1,94 @@
+/* MIVCHAT combined workspace stylesheet
+   Split preview, resize handle, responsive layout, language accents, toolbars, scrollbars.
+*/
+.mivchat { min-width: 0; min-height: 0; scrollbar-width: thin; scrollbar-color: rgba(145,132,180,.48) transparent; }
+.mivchat.has-live-preview { display: flex; flex-direction: row; overflow: hidden; }
+.mivchat.has-live-preview > .main-panel { flex: 1 1 0; width: 0; min-width: 0; min-height: 0; overflow: hidden; }
+.mivchat.has-live-preview > .preview-workspace {
+  position: relative; inset: auto; z-index: 5; display: flex; flex: 0 1 520px;
+  flex-direction: column; width: 520px; min-width: 300px; max-width: 70vw;
+  height: 100%; min-height: 0; overflow: hidden;
+  border-left: 1px solid var(--border, var(--border-color, rgba(130,140,160,.25)));
+  background: var(--panel, #11131b); color: var(--text, #f4f3fa);
+}
+.preview-workspace-header { display:flex; flex:0 0 auto; align-items:center; justify-content:space-between; gap:8px; min-width:0; min-height:62px; padding:9px 12px; border-bottom:1px solid var(--border,rgba(150,150,180,.2)); background:var(--panel,#11131b); }
+.preview-workspace-title, .preview-workspace-actions { display:flex; align-items:center; gap:7px; min-width:0; }
+.preview-workspace-title { flex:1 1 auto; }
+.preview-workspace-actions { flex:0 0 auto; }
+.preview-workspace-heading { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.preview-workspace-heading strong { font-size:13px; font-weight:700; }
+.preview-workspace-heading span { color:var(--muted,#9995ac); font-size:11px; }
+.preview-workspace-language { display:inline-flex; align-items:center; padding:4px 7px; border:1px solid currentColor; border-radius:6px; font-size:10px; font-weight:800; letter-spacing:.07em; }
+.preview-workspace-button { display:inline-flex; flex-shrink:0; align-items:center; justify-content:center; gap:6px; min-width:32px; min-height:32px; padding:6px 9px; border:1px solid var(--border,rgba(150,150,180,.22)); border-radius:8px; background:transparent; color:inherit; cursor:pointer; font-size:11px; }
+.preview-workspace-button:hover { background:rgba(139,121,255,.12); }
+.preview-workspace-content { flex:1 1 auto; min-width:0; min-height:0; height:auto; overflow:hidden; background:#fff; }
+.preview-workspace-frame { display:block; width:100%; height:100%; min-height:0; border:0; background:#fff; }
+
+/* React must render this handle and implement pointer dragging in JavaScript. */
+.preview-resize-handle { position:relative; z-index:20; flex:0 0 5px; width:5px; min-width:5px; cursor:col-resize; touch-action:none; background:transparent; transition:background 150ms ease; }
+.preview-resize-handle:hover, .preview-resize-handle:active { background:rgba(112,100,255,.7); }
+.preview-resize-handle:focus-visible { outline:2px solid #8b7bff; outline-offset:-2px; }
+
+/* Code block and toolbar */
+.code-block-shell { --language-accent:#a78bfa; --language-tint:rgba(167,139,250,.12); min-width:0; overflow:hidden; border:1px solid color-mix(in srgb,var(--language-accent) 35%,transparent); border-left:3px solid var(--language-accent); border-radius:12px; background:#10121a; color:#e6e6ef; }
+.code-block-toolbar { display:flex; align-items:center; justify-content:space-between; gap:12px; min-width:0; min-height:40px; padding:5px 9px 5px 12px; border-bottom:1px solid color-mix(in srgb,var(--language-accent) 25%,transparent); background:var(--language-tint); }
+.code-block-shell .code-language { min-width:0; color:var(--language-accent); font-family:Consolas,"Cascadia Code",monospace; font-size:11px; font-weight:800; letter-spacing:.035em; text-transform:lowercase; }
+.code-block-shell .code-block-actions, .code-block-actions { display:flex; flex-shrink:0; align-items:center; gap:5px; margin-left:auto; }
+.code-block-shell .code-icon-button, .code-icon-button { display:inline-flex; align-items:center; justify-content:center; width:30px; height:28px; border:1px solid color-mix(in srgb,var(--language-accent,#a78bfa) 30%,transparent); border-radius:7px; background:rgba(12,13,20,.38); color:var(--language-accent,#a78bfa); cursor:pointer; }
+.code-block-shell .code-icon-button:hover:not(:disabled), .code-icon-button:hover:not(:disabled) { background:var(--language-tint,rgba(167,139,250,.12)); filter:brightness(1.2); }
+.code-block-shell .code-icon-button:disabled, .code-icon-button:disabled { cursor:not-allowed; opacity:.4; }
+.code-block-shell pre { max-width:100%; margin:0; padding:0; overflow:auto; background:#0d1117 !important; scrollbar-width:thin; scrollbar-color:rgba(155,145,185,.55) transparent; }
+.code-block-shell pre code { display:block; min-width:max-content; padding:16px; background:transparent !important; font-family:"Cascadia Code","JetBrains Mono","Fira Code",Consolas,"Courier New",monospace; font-size:12.5px; line-height:1.65; tab-size:2; }
+.message-content pre { max-width:100%; }
+
+/* Language accents and tints */
+.code-language-javascript,.code-language-js,.code-language-mjs,.code-language-cjs { --language-accent:#f6d365; --language-tint:rgba(246,211,101,.09); }
+.code-language-typescript,.code-language-ts,.code-language-jsx,.code-language-tsx { --language-accent:#38bdf8; --language-tint:rgba(56,189,248,.10); }
+.code-language-python,.code-language-py { --language-accent:#7cc7ff; --language-tint:rgba(124,199,255,.10); }
+.code-language-html,.code-language-htm,.code-language-xml,.code-language-svg { --language-accent:#ff986b; --language-tint:rgba(255,152,107,.10); }
+.code-language-css,.code-language-scss,.code-language-less { --language-accent:#d4a1ff; --language-tint:rgba(212,161,255,.10); }
+.code-language-json,.code-language-yaml,.code-language-yml,.code-language-toml { --language-accent:#77e3bd; --language-tint:rgba(119,227,189,.10); }
+.code-language-sql { --language-accent:#72c8ff; --language-tint:rgba(114,200,255,.10); }
+.code-language-bash,.code-language-sh,.code-language-shell,.code-language-ps1,.code-language-powershell,.code-language-bat { --language-accent:#b7e778; --language-tint:rgba(183,231,120,.10); }
+.code-language-c,.code-language-h,.code-language-cpp,.code-language-hpp,.code-language-csharp,.code-language-cs,.code-language-rust,.code-language-rs,.code-language-go { --language-accent:#ff82b2; --language-tint:rgba(255,130,178,.10); }
+.code-language-php { --language-accent:#a8a6ff; --language-tint:rgba(168,166,255,.10); }
+.code-language-java,.code-language-kotlin,.code-language-kt,.code-language-swift,.code-language-dart { --language-accent:#ffb86b; --language-tint:rgba(255,184,107,.10); }
+.code-language-ruby,.code-language-rb { --language-accent:#f87171; --language-tint:rgba(248,113,113,.10); }
+.code-language-env,.code-language-ini,.code-language-log,.code-language-plain { --language-accent:#a3a3a3; --language-tint:rgba(163,163,163,.08); }
+.code-language-csv,.code-language-tsv { --language-accent:#34d399; --language-tint:rgba(52,211,153,.10); }
+.code-language-markdown,.code-language-md,.code-language-mdx { --language-accent:#e4e7ef; --language-tint:rgba(228,231,239,.08); }
+
+/* Highlight.js token colors, when these classes are present */
+.code-language-javascript .hljs-keyword,.code-language-js .hljs-keyword,.code-language-typescript .hljs-keyword,.code-language-ts .hljs-keyword,.code-language-jsx .hljs-keyword,.code-language-tsx .hljs-keyword { color:#f6d365; }
+.code-language-python .hljs-keyword,.code-language-py .hljs-keyword { color:#7cc7ff; }
+.code-language-html .hljs-tag,.code-language-html .hljs-name,.code-language-xml .hljs-tag,.code-language-xml .hljs-name { color:#ff986b; }
+.code-language-css .hljs-selector-tag,.code-language-css .hljs-attribute,.code-language-scss .hljs-selector-class { color:#d4a1ff; }
+.code-language-json .hljs-attr,.code-language-yaml .hljs-attr { color:#77e3bd; }
+.code-language-sql .hljs-keyword { color:#72c8ff; }
+.code-language-bash .hljs-built_in,.code-language-sh .hljs-built_in { color:#b7e778; }
+.code-language-c .hljs-keyword,.code-language-cpp .hljs-keyword { color:#ff82b2; }
+.code-language-php .hljs-variable { color:#a8a6ff; }
+
+/* Slim scrollbars */
+.mivchat *, .conversation-area, .preview-workspace, .preview-workspace-content, .message-content pre, .file-content-editor { scrollbar-width:thin; scrollbar-color:rgba(145,132,180,.48) transparent; }
+.mivchat *::-webkit-scrollbar,.conversation-area::-webkit-scrollbar,.preview-workspace::-webkit-scrollbar,.preview-workspace-content::-webkit-scrollbar,.message-content pre::-webkit-scrollbar { width:7px; height:7px; }
+.mivchat *::-webkit-scrollbar-track,.conversation-area::-webkit-scrollbar-track,.preview-workspace::-webkit-scrollbar-track,.preview-workspace-content::-webkit-scrollbar-track,.message-content pre::-webkit-scrollbar-track { background:transparent !important; }
+.mivchat *::-webkit-scrollbar-thumb,.conversation-area::-webkit-scrollbar-thumb,.preview-workspace::-webkit-scrollbar-thumb,.preview-workspace-content::-webkit-scrollbar-thumb,.message-content pre::-webkit-scrollbar-thumb { background:rgba(145,132,180,.58); border:2px solid transparent; border-radius:999px; background-clip:padding-box; }
+.mivchat *::-webkit-scrollbar-thumb:hover { background:rgba(173,157,220,.82); background-clip:padding-box; }
+
+/* Light theme */
+.mivchat.light > .preview-workspace { --panel:#fbfaff; --text:#29243b; --muted:#777187; --border:rgba(65,53,95,.15); background:#fbfaff; color:#29243b; }
+.mivchat.light .preview-workspace-header { background:#fbfaff; }
+
+/* Responsive layout */
+@media (max-width:900px) { .mivchat.has-live-preview > .preview-workspace { max-width:70vw; } .preview-workspace-heading span { display:none; } }
+@media (max-width:760px) {
+  .mivchat.has-live-preview { flex-direction:column; }
+  .mivchat.has-live-preview > .main-panel { flex:1 1 55%; width:100%; min-height:180px; }
+  .mivchat.has-live-preview > .preview-workspace { flex:1 1 45%; width:100%; max-width:100%; min-width:0; min-height:180px; border-left:0; border-top:1px solid var(--border,var(--border-color,rgba(130,140,160,.25))); }
+  .preview-resize-handle { display:none; }
+  .mivchat.has-live-preview .preview-workspace-content { height:auto; }
+  .preview-workspace-header { min-height:58px; padding:8px 10px; }
+}
+@media (max-width:430px) { .preview-workspace-button span { display:none; } .preview-workspace-button { padding:6px; } .preview-workspace-language { display:none; } .code-block-shell pre code { font-size:12px; } }
+.stop-generation-button { background:#dc3545; color:#fff; }
