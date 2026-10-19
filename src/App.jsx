@@ -22,7 +22,7 @@ import { supabase } from './lib/supabaseClient';
 import { FcGoogle } from 'react-icons/fc';
 import { FaGithub, FaDiscord } from 'react-icons/fa';
 
-const API_URL = 'http://localhost:3001/api/chat';
+const API_URL = '${API_BASE}/api/chat';
 
 function createId() {
   return crypto.randomUUID();
@@ -190,7 +190,7 @@ function fallbackChatTitle(message) {
 async function generateChatTitle(message, reply = '') {
   const fallback = fallbackChatTitle(message);
   try {
-    const response = await fetch('http://localhost:3001/api/chat/title', {
+    const response = await fetch('${API_BASE}/api/chat/title', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       signal: AbortSignal.timeout(12000),
@@ -558,7 +558,7 @@ function LandingPage({ isLight, onToggleTheme, onEnter, onSignIn, onSignUp }) {
   };
 
   try {
-    const response = await fetch('http://localhost:3001/api/feedback', {
+    const response = await fetch('${API_BASE}/api/feedback', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(entry),
@@ -1725,7 +1725,7 @@ async function handleGenerateFile() {
 
   try {
     const response = await fetch(
-      'http://localhost:3001/api/files/generate',
+      '${API_BASE}/api/files/generate',
       {
         method: 'POST',
         headers: {
@@ -1866,7 +1866,7 @@ async function handleSend(event) {
         throw new Error('Image creation currently uses your written prompt. Remove attachments or turn off Create Image mode first.');
       }
 
-      const imageResponse = await fetch('http://localhost:3001/api/chat/image', {
+      const imageResponse = await fetch('${API_BASE}/api/chat/image', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         signal: AbortSignal.timeout(120000),
