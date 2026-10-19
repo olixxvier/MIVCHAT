@@ -45,12 +45,15 @@ const ai = new GoogleGenAI({
   apiKey: process.env.GEMINI_API_KEY,
 });
 
+
 app.use(cors({
   origin: [
     'http://localhost:5173',
     'http://127.0.0.1:5173',
+    'https://mivchat.vercel.app',
   ],
 }));
+
 
 // Base64 increases file size, so allow enough room for the JSON request.
 app.use(express.json({ limit: '20mb' }));
