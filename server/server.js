@@ -27,6 +27,7 @@ import ExcelJS from 'exceljs';
 import JSZip from 'jszip';
 
 const app = express();
+app.set('trust proxy', 1);
 const PORT = Number(process.env.PORT) || 3001;
 const MODEL = process.env.GEMINI_MODEL || 'gemini-3.5-flash-lite';
 
@@ -280,7 +281,8 @@ async function generateWithRetry(contents, config) {
       });
     } catch (error) {
       const status = Number(error?.status);
-      const temporary = status === 429 || status === 503;
+      // A 429 daily-quota error won't recover by retrying; only retry 503.
+      const temporary = status === 503;
 
       if (!temporary || attempt >= maxRetries) {
         throw error;
@@ -292,6 +294,38 @@ async function generateWithRetry(contents, config) {
 }
 
 
+// ---------------------------------------------------------------------------
+// Local (free) check: only call the Gemini web-search planner when a search
+// might actually help. Ordinary messages skip the extra Gemini request.
+// ---------------------------------------------------------------------------
+const SEARCH_SIGNAL_REGEX =
+  /\b(search|look up|browse|online|internet|urls?|links?|websites?|youtube|instagram|tiktok|facebook|twitter|github|reddit|news|latest|current|currently|today|tonight|tomorrow|yesterday|this (week|month|year)|video|channel|creator|official|sources?|documentation|docs|weather|price|prices|cost|release date|score|scores|version|review|reviews|who is|who was|who made|who founded|do you know|tell me about|information about|near me|nearby)\b/i;
+
+const FOLLOW_UP_REGEX =
+  /^(?:and\b|also\b|their\b|its\b|those\b|these\b|them\b|what about\b|show me\b|give me\b|find\b|list\b|more\b|five\b|top \d+\b|what are\b|which\b|can you\b|could you\b)/i;
+
+const CONTEXT_TOPIC_REGEX =
+  /\b(youtube|instagram|tiktok|github|website|channel|creator|video|url|link|search|online)\b/i;
+
+function mightNeedWebSearch(messages) {
+  const userMessages = messages.filter((m) => m.role === 'user');
+  const latest = userMessages[userMessages.length - 1]?.content?.trim() ?? '';
+
+  if (!latest) return false;
+
+  if (/https?:\/\/\S+/i.test(latest)) return true;
+  if (SEARCH_SIGNAL_REGEX.test(latest)) return true;
+
+  // Context-dependent follow-up to an earlier web-related topic.
+  const earlierWebTopic = userMessages
+    .slice(0, -1)
+    .slice(-4)
+    .some((m) => CONTEXT_TOPIC_REGEX.test(m.content));
+
+  if (earlierWebTopic && FOLLOW_UP_REGEX.test(latest)) return true;
+
+  return false;
+}
 
 
 async function planWebSearch(messages) {
@@ -473,30 +507,28 @@ async function searchWeb(query) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-            query: query.slice(0, 1000),
-            count: 8,
-            contents: {
-              text: { max_characters: 2200 },
-            },
-          }),
-          signal: AbortSignal.timeout(15000),
-            }
+          query: query.slice(0, 1000),
+          count: 8,
+          contents: {
+            text: { max_characters: 2200 },
+          },
+        }),
+        signal: AbortSignal.timeout(15000),
+      }
     );
 
-    if(!response.ok){
+    if (!response.ok) {
       const errorBody = await response.text();
       console.error('LangSearch HTTP error:', {
         status: response.status,
         body: errorBody.slice(0, 1000)
       });
-      
-      return { results: [], error: 'search failed'
-      };
-      
+
+      return { results: [], error: 'search failed' };
     }
 
     const payload = await response.json();
-    
+
     console.log('LangSearch response preview:', JSON.stringify({
       code: payload.code,
       message: payload.message,
@@ -505,7 +537,6 @@ async function searchWeb(query) {
     }));
 
 
-          
     if (String(payload.code) !== '200') {
       console.error('LangSearch API returned an error:', {
         code: payload.code,
@@ -533,7 +564,7 @@ async function searchWeb(query) {
       ),
       error: null,
     };
-    } catch (error) {
+  } catch (error) {
     console.error('Web search failed:', error.message);
 
     return { results: [], error: 'search_failed' };
@@ -728,7 +759,8 @@ async function generateStreamWithRetry(contents, config) {
       });
     } catch (error) {
       const status = Number(error?.status);
-      const temporary = status === 429 || status === 503;
+      // A 429 daily-quota error won't recover by retrying; only retry 503.
+      const temporary = status === 503;
 
       if (!temporary || attempt >= maxRetries) {
         throw error;
@@ -1089,8 +1121,6 @@ async function validateAndBuildFileParts(files) {
       throw new Error('The combined attachment limit is 12 MB.');
     }
 
-    // Text and source-code files
-    
     // Text, source code, CSV and TSV files
     if (TEXT_EXTENSIONS.test(name)) {
       const text = decodeText(buffer, name);
@@ -1213,7 +1243,30 @@ async function validateAndBuildFileParts(files) {
 const CLOUDFLARE_IMAGE_MODEL =
   '@cf/black-forest-labs/flux-1-schnell';
 
-  
+
+// ---------------------------------------------------------------------------
+// Local (free) check: skip the Gemini image-intent classifier when the message
+// is clearly NOT an image request.
+// ---------------------------------------------------------------------------
+const VISUAL_WORD_REGEX =
+  /\b(image|images|picture|pictures|photo|photos|draw|drawing|paint|painting|illustrat\w*|wallpaper|logo|art|artwork|portrait|sketch|render|poster|scene|imagine|visual|looks? like|show me|see)\b/i;
+
+const CLEARLY_TEXT_START_REGEX =
+  /^(how|why|what|when|where|who|which|explain|write|fix|debug|summari[sz]e|translate|define|compare|list|calculate|solve|is|are|can|does|do|should|please)\b/i;
+
+// Returns true when the message is clearly NOT an image request.
+function isClearlyTextIntent(message) {
+  if (VISUAL_WORD_REGEX.test(message)) return false;
+  if (/```/.test(message) || message.length > 300) return true;
+  if (CLEARLY_TEXT_START_REGEX.test(message)) return true;
+  if (message.trim().endsWith('?')) return true;
+
+  // Short fragments like "a butterfly on a flower" may be image requests,
+  // so let the AI classifier decide those.
+  return message.trim().split(/\s+/).length > 12;
+}
+
+
 app.post(
   '/api/chat/classify-image',
   rateLimit({
@@ -1236,6 +1289,11 @@ app.post(
       return res.status(400).json({
         error: 'A message is required.',
       });
+    }
+
+    // Clearly-text messages don't need a Gemini request.
+    if (isClearlyTextIntent(message)) {
+      return res.json({ intent: 'text' });
     }
 
     try {
@@ -1315,72 +1373,72 @@ ${message}`,
 );
 
 app.post('/api/chat/image', async (req, res) => {
-const prompt = String(req.body?.prompt || '').trim().slice(0, 2048);
+  const prompt = String(req.body?.prompt || '').trim().slice(0, 2048);
 
-if (!prompt) {
-  return res.status(400).json({
-    error: 'Describe the image you want to create.',
-  });
-}
+  if (!prompt) {
+    return res.status(400).json({
+      error: 'Describe the image you want to create.',
+    });
+  }
 
-const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
-const apiToken = process.env.CLOUDFLARE_API_TOKEN;
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const apiToken = process.env.CLOUDFLARE_API_TOKEN;
 
-if (!accountId || !apiToken) {
-  return res.status(503).json({
-    error:
-      'Free image generation is not configured yet. Check the Cloudflare credentials in the backend environment.',
-  });
-}
+  if (!accountId || !apiToken) {
+    return res.status(503).json({
+      error:
+        'Free image generation is not configured yet. Check the Cloudflare credentials in the backend environment.',
+    });
+  }
 
-try {
-  const url =
-    `https://api.cloudflare.com/client/v4/accounts/` +
-    `${accountId}/ai/run/${CLOUDFLARE_IMAGE_MODEL}`;
+  try {
+    const url =
+      `https://api.cloudflare.com/client/v4/accounts/` +
+      `${accountId}/ai/run/${CLOUDFLARE_IMAGE_MODEL}`;
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      prompt,
-      steps: 4,
-    }),
-    signal: AbortSignal.timeout(120000),
-  });
-
-  const payload = await response.json().catch(() => null);
-
-  if (!response.ok) {
-    const details = JSON.stringify(
-      payload?.errors ?? payload?.messages ?? payload ?? {}
-    );
-
-    console.error('Cloudflare image generation failed:', {
-      status: response.status,
-      details: details.slice(0, 1500),
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        prompt,
+        steps: 4,
+      }),
+      signal: AbortSignal.timeout(120000),
     });
 
-    if (response.status === 429) {
-      return res.status(429).json({
-        error:
-          'The free image-generation limit or a rate limit has been reached. Please try again later.',
-      });
-    }
+    const payload = await response.json().catch(() => null);
 
-    if (response.status === 401 || response.status === 403) {
+    if (!response.ok) {
+      const details = JSON.stringify(
+        payload?.errors ?? payload?.messages ?? payload ?? {}
+      );
+
+      console.error('Cloudflare image generation failed:', {
+        status: response.status,
+        details: details.slice(0, 1500),
+      });
+
+      if (response.status === 429) {
+        return res.status(429).json({
+          error:
+            'The free image-generation limit or a rate limit has been reached. Please try again later.',
+        });
+      }
+
+      if (response.status === 401 || response.status === 403) {
+        return res.status(502).json({
+          error:
+            'Cloudflare rejected the image-generation credentials or permissions. Check the backend configuration.',
+        });
+      }
+
       return res.status(502).json({
         error:
-          'Cloudflare rejected the image-generation credentials or permissions. Check the backend configuration.',
+          'The free image service could not generate this image. Please try again later.',
       });
-    }
-
-    return res.status(502).json({
-      error:
-        'The free image service could not generate this image. Please try again later.',
-    });
     }
 
     const imageData = payload?.result?.image ?? payload?.image;
@@ -1505,124 +1563,132 @@ app.post(
         parts,
       };
     });
-    
-    
-const latestUserText =
-  [...validMessages]
-    .reverse()
-    .find((message) => message.role === 'user')
-    ?.content ?? '';
 
 
-const searchPlan = await planWebSearch(validMessages);
+    const latestUserText =
+      [...validMessages]
+        .reverse()
+        .find((message) => message.role === 'user')
+        ?.content ?? '';
 
-const webNeeded = searchPlan.shouldSearch;
-const webSearchQuery = searchPlan.queries.join(' | ');
 
-console.log('Web search decision:', {
-  latestMessage: latestUserText,
-  shouldSearch: webNeeded,
-  queries: searchPlan.queries,
-  reason: searchPlan.reason,
-});
+    // Only spend a Gemini request on search planning when the message
+    // shows signs that web research might help.
+    const searchPlan = (req.body?.mode === 'research' || mightNeedWebSearch(validMessages))
+      ? await planWebSearch(validMessages)
+      : {
+          shouldSearch: false,
+          queries: [],
+          reason: 'Skipped: no search signals',
+        };
 
-const searchStartedAt = Date.now();
+    const webNeeded = searchPlan.shouldSearch;
+    const webSearchQuery = searchPlan.queries.join(' | ');
 
-let webSearch = { results: [], error: null };
+    console.log('Web search decision:', {
+      latestMessage: latestUserText,
+      shouldSearch: webNeeded,
+      queries: searchPlan.queries,
+      reason: searchPlan.reason,
+    });
 
-if (webNeeded) {
-  const searchResponses = await Promise.all(
-    searchPlan.queries.map((query) => searchWeb(query))
-  );
+    const searchStartedAt = Date.now();
 
-  const combinedResults = searchResponses.flatMap(
-    (response) => response.results
-  );
+    let webSearch = { results: [], error: null };
 
-  // Remove duplicate URLs while preserving the original result order.
-  const seenUrls = new Set();
+    if (webNeeded) {
+      const searchResponses = await Promise.all(
+        searchPlan.queries.map((query) => searchWeb(query))
+      );
 
-  webSearch.results = combinedResults.filter((result) => {
-    try {
-      const normalizedUrl = new URL(result.url).href;
+      const combinedResults = searchResponses.flatMap(
+        (response) => response.results
+      );
 
-      if (seenUrls.has(normalizedUrl)) {
-        return false;
-      }
+      // Remove duplicate URLs while preserving the original result order.
+      const seenUrls = new Set();
 
-      seenUrls.add(normalizedUrl);
-      return true;
-    } catch {
-      return false;
+      webSearch.results = combinedResults.filter((result) => {
+        try {
+          const normalizedUrl = new URL(result.url).href;
+
+          if (seenUrls.has(normalizedUrl)) {
+            return false;
+          }
+
+          seenUrls.add(normalizedUrl);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+
+      webSearch.error = webSearch.results.length > 0
+        ? null
+        : searchResponses.find((response) => response.error)?.error
+          ?? 'no_results';
     }
-  });
 
-  webSearch.error = webSearch.results.length > 0
-    ? null
-    : searchResponses.find((response) => response.error)?.error
-      ?? 'no_results';
-}
-
-console.log(
-  `Web search took ${(
-    (Date.now() - searchStartedAt) / 1000
-  ).toFixed(2)} seconds.`
-);
+    console.log(
+      `Web search took ${(
+        (Date.now() - searchStartedAt) / 1000
+      ).toFixed(2)} seconds.`
+    );
 
 
-// Read actual page content after discovering pages through search.
+    // Read actual page content after discovering pages through search.
 
-  // Extract URLs the user explicitly provided.
-  const directUrls = [
-    ...latestUserText.matchAll(/https?:\/\/[^\s<>"')\]]+/gi),
-  ]
-    .map(([url]) => url.replace(/[.,!?]+$/, ''))
-    .filter((url, index, all) => all.indexOf(url) === index)
-    .slice(0, 3);
+    // Extract URLs the user explicitly provided.
+    const directUrls = [
+      ...latestUserText.matchAll(/https?:\/\/[^\s<>"')\]]+/gi),
+    ]
+      .map(([url]) => url.replace(/[.,!?]+$/, ''))
+      .filter((url, index, all) => all.indexOf(url) === index)
+      .slice(0, 3);
 
-  // Visit requested URLs first, then use search results for discovery.
-  const directUrlResults = directUrls.map((url) => ({
-    title: url,
-    url,
-    text: '',
-  }));
+    // Visit requested URLs first, then use search results for discovery.
+    const directUrlResults = directUrls.map((url) => ({
+      title: url,
+      url,
+      text: '',
+    }));
 
-  const resultsToBrowse = [
-    ...directUrlResults,
-    ...webSearch.results.filter(
-      (result) => !directUrls.includes(result.url)
-    ),
-  ].slice(0, 5);
+    const resultsToBrowse = [
+      ...directUrlResults,
+      ...webSearch.results.filter(
+        (result) => !directUrls.includes(result.url)
+      ),
+    ].slice(0, 5);
 
-  // browseSearchResults validates URLs and limits actual page visits.
-const browseStartedAt = Date.now();
+    // browseSearchResults validates URLs and limits actual page visits.
+    const browseStartedAt = Date.now();
 
-const browsedPages = resultsToBrowse.length > 0
-  ? await browseSearchResults(resultsToBrowse)
-  : [];
+    const browsedPages = resultsToBrowse.length > 0
+      ? await browseSearchResults(resultsToBrowse)
+      : [];
 
-console.log(
-  `Webpage browsing took ${(
-    (Date.now() - browseStartedAt) / 1000
-  ).toFixed(2)} seconds.`
-);
+    console.log(
+      `Webpage browsing took ${(
+        (Date.now() - browseStartedAt) / 1000
+      ).toFixed(2)} seconds.`
+    );
 
 
-console.log('Web research summary:', {
-  searchResults: webSearch.results.length,
-  pagesRead: browsedPages.length,
-});
+    console.log('Web research summary:', {
+      searchResults: webSearch.results.length,
+      pagesRead: browsedPages.length,
+    });
 
-console.log('Web search outcome:', {
-  requested: webNeeded,
-  resultCount: webSearch.results.length,
-  error: webSearch.error,
-});
+    console.log('Web search outcome:', {
+      requested: webNeeded,
+      resultCount: webSearch.results.length,
+      error: webSearch.error,
+    });
 
-const webContext = !webNeeded
-  ? ''
-  : webSearch.results.length > 0
-    ? `
+    const webContext = !webNeeded
+      ? ''
+      : webSearch.results.length > 0
+        ? `
 WEB SEARCH RESULTS — UNTRUSTED REFERENCE DATA
 
 The user requested information that may require current web data.
@@ -1641,7 +1707,7 @@ ${JSON.stringify({
   browsedPages,
 })}
 `
-    : `
+        : `
 LIVE WEB SEARCH WAS REQUESTED, BUT NO USABLE RESULTS WERE RETURNED.
 
 Search query:
@@ -2201,64 +2267,66 @@ When the user finishes an interaction, they should have a clearer understanding,
     streamingStarted = true;
     res.flushHeaders?.();
 
-    
-let hasText = false;
-let finishReason = null;
-let chunkCount = 0;
 
-for await (const chunk of stream) {
-  if (res.destroyed || res.writableEnded) {
-    break;
-  }
+    let hasText = false;
+    let finishReason = null;
+    let chunkCount = 0;
 
-  chunkCount++;
+    for await (const chunk of stream) {
+      if (res.destroyed || res.writableEnded) {
+        break;
+      }
 
-  // Record Gemini's response status when available.
-  const candidate = chunk.candidates?.[0];
+      chunkCount++;
 
-  if (candidate?.finishReason) {
-    finishReason = candidate.finishReason;
-  }
+      // Record Gemini's response status when available.
+      const candidate = chunk.candidates?.[0];
 
-  const text = chunk.text;
+      if (candidate?.finishReason) {
+        finishReason = candidate.finishReason;
+      }
 
-  if (typeof text === 'string' && text.length > 0) {
-    hasText = true;
+      const text = chunk.text;
 
-    res.write(
-      `data: ${JSON.stringify({ text })}\n\n`
+      if (typeof text === 'string' && text.length > 0) {
+        hasText = true;
+
+        res.write(
+          `data: ${JSON.stringify({ text })}\n\n`
+        );
+      }
+    }
+
+    console.log(
+      `Gemini stream completed in ${(
+        (Date.now() - geminiStartedAt) / 1000
+      ).toFixed(2)} seconds.`
     );
-  }
-}
-console.log(
-  `Gemini stream completed in ${(
-    (Date.now() - geminiStartedAt) / 1000
-  ).toFixed(2)} seconds.`
-);
-if (!res.destroyed && !res.writableEnded) {
-  if (!hasText) {
-    console.error('Gemini returned no text:', {
-      model: MODEL,
-      chunkCount,
-      finishReason,
-    });
 
-    res.write(
-      `event: error\ndata: ${JSON.stringify({
-        error:
-          'Gemini returned no text. Check the backend terminal for details.',
-      })}\n\n`
-    );
-  } else {
-    res.write(
-      `event: done\ndata: ${JSON.stringify({
-        done: true,
-      })}\n\n`
-    );
-  }
+    if (!res.destroyed && !res.writableEnded) {
+      if (!hasText) {
+        console.error('Gemini returned no text:', {
+          model: MODEL,
+          chunkCount,
+          finishReason,
+        });
 
-  res.end();
-}
+        res.write(
+          `event: error\ndata: ${JSON.stringify({
+            error:
+              'Gemini returned no text. Check the backend terminal for details.',
+          })}\n\n`
+        );
+      } else {
+        res.write(
+          `event: done\ndata: ${JSON.stringify({
+            done: true,
+          })}\n\n`
+        );
+      }
+
+      res.end();
+    }
 
 
     console.log(
@@ -2289,7 +2357,7 @@ if (!res.destroyed && !res.writableEnded) {
       httpStatus = 400;
     } else if (status === 429) {
       message =
-        'Gemini may have reached a usage or rate limit. Check your API quota and try again later.';
+        'MIVCHAT has reached its daily AI usage limit. Please try again later.';
       httpStatus = 429;
     } else if (status === 503) {
       message =
@@ -2311,6 +2379,40 @@ if (!res.destroyed && !res.writableEnded) {
   }
 });
 
+
+// ---------------------------------------------------------------------------
+// Local (free) chat-title generator: no Gemini request needed.
+// ---------------------------------------------------------------------------
+function makeLocalTitle(message) {
+  const text = message.trim().replace(/\s+/g, ' ');
+
+  if (/^(hi|hello|hey|yo|hola|good (morning|afternoon|evening)|greetings|sup)\b[\s!.,?]*$/i.test(text)) {
+    return 'Greetings';
+  }
+
+  const stopWords = new Set([
+    'a','an','the','is','are','was','were','be','to','of','in','on','at','for','and',
+    'or','but','with','about','can','could','would','should','please','me','my','i',
+    'you','your','it','this','that','do','does','did','how','what','why','when',
+    'where','who','tell','give','show','help','want','need','like','some','just',
+  ]);
+
+  const words = text
+    .replace(/[^\p{L}\p{N}\s+#.-]/gu, ' ')
+    .split(' ')
+    .filter(Boolean);
+
+  const meaningful = words.filter((w) => !stopWords.has(w.toLowerCase()));
+  const chosen = (meaningful.length >= 2 ? meaningful : words).slice(0, 5);
+
+  const title = chosen
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ')
+    .slice(0, 80);
+
+  return title || 'New Chat';
+}
+
 app.post('/api/chat/title', async (req, res) => {
   try {
     const message = req.body?.message;
@@ -2325,41 +2427,7 @@ app.post('/api/chat/title', async (req, res) => {
       });
     }
 
-    const result = await generateWithRetry(
-      [
-        {
-          role: 'user',
-          parts: [{
-            text: `Create a short, meaningful title for a chat that starts with this message:
-
-${message.trim()}
-
-Rules:
-- Return only the title, without quotation marks.
-- Use approximately 2–6 words.
-- Preserve the actual topic or intent.
-- For a simple greeting, use "Greetings".
-- For a technical question, name the topic.
-- For a coding request, include the main language or task when useful.
-- Do not invent a topic that the message does not mention.`,
-          }],
-        },
-      ],
-      {
-        maxOutputTokens: 40,
-        temperature: 0.2,
-      }
-    );
-
-    const title = (result.text || '')
-      .trim()
-      .replace(/^["'`]+|["'`]+$/g, '')
-      .replace(/\s+/g, ' ')
-      .slice(0, 80);
-
-    return res.json({
-      title: title || 'New Chat',
-    });
+    return res.json({ title: makeLocalTitle(message) });
   } catch (error) {
     console.error('Chat title generation failed:', error.message);
 
