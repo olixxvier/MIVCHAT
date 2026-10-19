@@ -208,6 +208,23 @@ async function generateChatTitle(message, reply = '') {
   }
 }
 
+function getGuestRateLimitId() {
+  const storageKey = 'mivchat-guest-rate-limit-id';
+
+  try {
+    let id = localStorage.getItem(storageKey);
+
+    if (!id) {
+      id = crypto.randomUUID();
+      localStorage.setItem(storageKey, id);
+    }
+
+    return id;
+  } catch {
+    return crypto.randomUUID();
+  }
+}
+
 async function requestAI(messages, files = [], locationContext = '', onChunk, mode = 'normal', preferences = {}) {
   const encodedFiles = await Promise.all(
     files.map(async (file) => ({
@@ -217,6 +234,13 @@ async function requestAI(messages, files = [], locationContext = '', onChunk, mo
       data: await fileToBase64(file),
     }))
   );
+
+const {
+  data: { session },
+} = await supabase.auth.getSession();
+
+const accessToken = session?.access_token;
+const guestId = accessToken ? null : getGuestRateLimitId();
 
   const response = await fetch(API_URL, {
     method: 'POST',

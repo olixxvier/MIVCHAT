@@ -18,7 +18,8 @@ dotenv.config({
 });
 import express from 'express';
 import cors from 'cors';
-import rateLimit from 'express-rate-limit';
+import rateLimit, { ipKeyGenerator } from 'express-rate-limit';
+import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI } from '@google/genai';
 import { generateFile } from './file-generation/generate.js';
 import mammoth from 'mammoth';
@@ -46,6 +47,24 @@ const ai = new GoogleGenAI({
 });
 
 
+const SUPABASE_URL =
+  process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+
+const SUPABASE_PUBLISHABLE_KEY =
+  process.env.SUPABASE_PUBLISHABLE_KEY ||
+  process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+
+const supabaseAuthClient =
+  SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY
+    ? createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+        },
+      })
+    : null;
+
 app.use(cors({
   origin: [
     'http://localhost:5173',
@@ -61,20 +80,108 @@ app.use(express.json({ limit: '20mb' }));
 
 app.use('/api/', rateLimit({
   windowMs: 15 * 60 * 1000,
-  limit: 20,
+  limit: 1000,
   standardHeaders: 'draft-8',
   legacyHeaders: false,
 
   // The image classifier has its own rate limit below.
   skip: (req) =>
-    req.originalUrl.startsWith('/api/chat/classify-image'),
-
+  req.originalUrl.startsWith('/api/chat/classify-image') ||
+  req.originalUrl.split('?')[0] === '/api/chat',
   handler: (_req, res) => {
     res.status(429).json({
       error: 'Too many requests. Please wait and try again later.',
     });
   },
 }));
+
+
+async function identifyChatRequester(req, res, next) {
+  const authHeader = req.get('authorization') || '';
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+
+  if (match) {
+    if (!supabaseAuthClient) {
+      return res.status(503).json({
+        error: 'Server authentication is not configured. Please try again later.',
+      });
+    }
+
+    try {
+      const { data, error } =
+        await supabaseAuthClient.auth.getUser(match[1]);
+
+      if (error || !data?.user?.id) {
+        return res.status(401).json({
+          error: 'Your sign-in session is invalid or expired. Please sign in again.',
+        });
+      }
+
+      req.chatRateLimitKey = `user:${data.user.id}`;
+      return next();
+    } catch (error) {
+      console.error(
+        'Chat token verification failed:',
+        error?.message || error
+      );
+
+      return res.status(503).json({
+        error: 'Could not verify your sign-in session. Please try again.',
+      });
+    }
+  }
+
+  const guestId = String(req.get('x-guest-id') || '');
+
+  if (/^[A-Za-z0-9-]{16,80}$/.test(guestId)) {
+    req.chatRateLimitKey = `guest:${guestId}`;
+  } else {
+    req.chatRateLimitKey = `guest-ip:${ipKeyGenerator(req.ip)}`;
+  }
+
+  return next();
+}
+
+const chatIdentityLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+
+  limit: (req) =>
+    req.chatRateLimitKey?.startsWith('user:') ? 500 : 300,
+
+  keyGenerator: (req) =>
+    req.chatRateLimitKey || ipKeyGenerator(req.ip),
+
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+
+  handler: (req, res) => {
+    const isSignedIn =
+      req.chatRateLimitKey?.startsWith('user:');
+
+    return res.status(429).json({
+      error: isSignedIn
+        ? 'You have reached your MIVCHAT message limit. Please wait 15 minutes and try again.'
+        : 'Your guest message limit has been reached. Please wait 15 minutes or sign in to continue.',
+    });
+  },
+});
+
+const chatIpSafetyLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  limit: 3000,
+
+  keyGenerator: (req) => ipKeyGenerator(req.ip),
+
+  standardHeaders: 'draft-8',
+  legacyHeaders: false,
+
+  handler: (_req, res) =>
+    res.status(429).json({
+      error: 'MIVCHAT is receiving unusually high traffic from this network. Please try again later.',
+    }),
+});
+
+
 const resend = process.env.RESEND_API_KEY
   ? new Resend(process.env.RESEND_API_KEY)
   : null;
@@ -1313,7 +1420,12 @@ try {
   }
 });
 
-app.post('/api/chat', async (req, res) => {
+app.post(
+  '/api/chat',
+  identifyChatRequester,
+  chatIpSafetyLimiter,
+  chatIdentityLimiter,
+  async (req, res) => {
   const clientContext = req.body?.clientContext ?? {};
   const requestedTimeZone = typeof clientContext.timeZone === 'string' ? clientContext.timeZone : 'UTC';
   const safeLocale = 'en-GB';
