@@ -14,6 +14,7 @@
   "type": "module",
   "dependencies": {
     "@google/genai": "^2.30.0",
+    "@supabase/supabase-js": "^2.118.0",
     "@swc/helpers": "^0.5.12",
     "cors": "^2.8.6",
     "docx": "^9.12.0",
